@@ -515,8 +515,18 @@ async function scheduleAnnouncement(entry) {
 
       // Speak in voice channel if bot is joined
       if (voiceStates.has(entry.guildId)) {
-        const ttsText = `Greetings players. ${entry.title}. ${entry.message}`;
-
+        function sanitizeForTTS(text) {
+          return text
+            .replace(/https?:\/\/\S+/g, "") // strip links
+            .replace(/[*_~`#>]/g, "") // strip markdown
+            .replace(/<@!?\d+>|<@&\d+>|<#\d+>/g, "") // strip mentions/channels
+            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "") // strip emoji
+            .replace(/\s+/g, " ") // collapse whitespace/newlines
+            .trim();
+        }
+        const ttsText = sanitizeForTTS(
+          `Greetings players. ${entry.title}. ${entry.message}`,
+        );
         // Priority: insert at front of queue
         if (!ttsQueues.has(entry.guildId)) ttsQueues.set(entry.guildId, []);
         ttsQueues.get(entry.guildId).unshift({ text: ttsText, lang: "en" });
