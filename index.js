@@ -114,6 +114,7 @@ function sanitizeForTTS(text) {
     .replace(/[*_~`#>]/g, "")
     .replace(/<@!?\d+>|<@&\d+>|<#\d+>/g, "")
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+    .replace(/&/g, " and ")          // ← new: avoid breaking SSML/XML
     .replace(/\n+/g, ". ")
     .replace(/\s+/g, " ")
     .trim();
