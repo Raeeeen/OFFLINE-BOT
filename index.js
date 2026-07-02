@@ -218,7 +218,7 @@ async function processQueue(guildId) {
     const writeStream = fs.createWriteStream(tmpFile);
     await new Promise((resolve, reject) => {
       audioStream.pipe(writeStream);
-      writeStream.on("finish", resolve);   
+      writeStream.on("finish", resolve);
       audioStream.on("error", reject);
       writeStream.on("error", reject);
     });
@@ -243,6 +243,9 @@ async function processQueue(guildId) {
     ttsPlayers.set(guildId, player);
     const resource = createAudioResource(tmpFile);
     connection.subscribe(player);
+    player.on("stateChange", (oldState, newState) => {
+      console.log(`TTS player: ${oldState.status} → ${newState.status}`);
+    });
     player.play(resource);
 
     let done = false;
