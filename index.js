@@ -206,6 +206,7 @@ async function processQueue(guildId) {
   }
 
   const { text, lang } = queue.shift();
+  console.log(`🗣️ About to synthesize: "${text}"`);
   console.log(`🔊 TTS playing: "${text.substring(0, 50)}..."`);
   const connection = getVoiceConnection(guildId);
 
@@ -529,6 +530,7 @@ async function scheduleAnnouncement(entry) {
         const ttsText = sanitizeForTTS(
           `Greetings players. ${entry.title}. ${entry.message}`,
         );
+        console.log(`🗣️ Sanitized TTS text: "${ttsText}"`);
         // Priority: insert at front of queue
         if (!ttsQueues.has(entry.guildId)) ttsQueues.set(entry.guildId, []);
         ttsQueues.get(entry.guildId).unshift({ text: ttsText, lang: "en" });
