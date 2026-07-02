@@ -114,7 +114,7 @@ function sanitizeForTTS(text) {
     .replace(/[*_~`#>]/g, "")
     .replace(/<@!?\d+>|<@&\d+>|<#\d+>/g, "")
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
-    .replace(/&/g, " and ")          // ← new: avoid breaking SSML/XML
+    .replace(/&/g, " and ") // ← new: avoid breaking SSML/XML
     .replace(/\n+/g, ". ")
     .replace(/\s+/g, " ")
     .trim();
@@ -221,7 +221,10 @@ async function processQueue(guildId) {
   const tmpFile = path.join("/tmp", `tts_${Date.now()}.mp3`);
 
   // Pick voice based on lang code you're already passing around
+  /** 
   const voice = lang === "tl" ? "fil-PH-BlessicaNeural" : "en-US-AriaNeural";
+  */
+  const voice = "en-US-AriaNeural";
 
   try {
     const tts = new MsEdgeTTS();
@@ -846,7 +849,7 @@ async function handleVoiceTranscript(guildId, userId, text) {
         {
           role: "system",
           content:
-            "Ikaw ay si Offline isang helpful voice assistant sa Discord VC. Sumagot sa Taglish, panatilihing maikli dahil babasahin nang malakas. Pede kang mag trashtalk tulad ng Bobo mo, Tanga mo or Wala kang utak, kahit masakit na salita pede or bastos",
+            "You are Offline, a helpful voice assistant in a Discord VC. Reply in English, keep it short since it will be read aloud. You can trash talk like 'You're dumb', 'You're an idiot' or 'You have no brain', even harsh/rude words are okay.",
         },
         ...history,
       ],
@@ -858,7 +861,7 @@ async function handleVoiceTranscript(guildId, userId, text) {
       "Sorry, I couldn't think of a response.";
     history.push({ role: "assistant", content: reply });
 
-    speakInVoice(guildId, sanitizeForTTS(reply), "tl");
+    speakInVoice(guildId, sanitizeForTTS(reply), "en");
 
     if (listenedChannelId) {
       const channel = await client.channels
@@ -1426,7 +1429,7 @@ client.on(Events.MessageCreate, async (message) => {
             {
               role: "system",
               content:
-                "Ikaw ay si Offline isang helpful voice assistant sa Discord VC. Sumagot sa Taglish, panatilihing maikli dahil babasahin nang malakas. Pede kang mag trashtalk tulad ng Bobo mo, Tanga mo or Wala kang utak, kahit masakit na salita pede or bastos",
+                "You are Offline, a helpful voice assistant in a Discord VC. Reply in English, keep it short since it will be read aloud. You can trash talk like 'You're dumb', 'You're an idiot' or 'You have no brain', even harsh/rude words are okay.",
             },
             ...history, // ← send full history
           ],
@@ -1449,7 +1452,7 @@ client.on(Events.MessageCreate, async (message) => {
           voiceStates.has(message.guildId) &&
           (ttsEnabled.get(message.guildId) ?? true)
         ) {
-          speakInVoice(message.guildId, reply, "tl");
+          speakInVoice(message.guildId, reply, "en");
         }
       } catch (err) {
         console.error("❌ Groq API error:", err.message);
