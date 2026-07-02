@@ -3,6 +3,8 @@ require("ffmpeg-static");
 require("discord.js");
 const playdl = require("play-dl");
 const prism = require("prism-media");
+const ffmpegPath = require("ffmpeg-static");
+process.env.FFMPEG_PATH = ffmpegPath;
 
 (async () => {
   try {
@@ -216,7 +218,7 @@ async function processQueue(guildId) {
     const writeStream = fs.createWriteStream(tmpFile);
     await new Promise((resolve, reject) => {
       audioStream.pipe(writeStream);
-      audioStream.on("end", resolve);
+      writeStream.on("finish", resolve);   
       audioStream.on("error", reject);
       writeStream.on("error", reject);
     });
