@@ -730,7 +730,14 @@ function startListeningToUser(guildId, userId, connection) {
   const pcmChunks = [];
 
   opusStream.pipe(opusDecoder);
-  opusDecoder.on("data", (chunk) => pcmChunks.push(chunk));
+  opusDecoder.on("data", (chunk) => {
+    pcmChunks.push(chunk);
+    const totalLen = pcmChunks.reduce((a, c) => a + c.length, 0);
+    if (totalLen > 48000 * 4 * 15) {
+      // ~15 sec cap
+      opusStream.destroy(); // forces 'end' early, or you could just drop
+    }
+  });
 
   const cleanupSub = () => {
     subs.delete(userId);
