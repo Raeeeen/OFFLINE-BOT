@@ -108,6 +108,17 @@ function findWakeWord(lowerText) {
   return null;
 }
 
+function sanitizeForTTS(text) {
+  return text
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[*_~`#>]/g, "")
+    .replace(/<@!?\d+>|<@&\d+>|<#\d+>/g, "")
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+    .replace(/\n+/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const subscribedUsers = new Map();
 const voiceListenEnabled = new Map();
 const transcribeQueues = new Map();
@@ -515,15 +526,6 @@ async function scheduleAnnouncement(entry) {
 
       // Speak in voice channel if bot is joined
       if (voiceStates.has(entry.guildId)) {
-        function sanitizeForTTS(text) {
-          return text
-            .replace(/https?:\/\/\S+/g, "") // strip links
-            .replace(/[*_~`#>]/g, "") // strip markdown
-            .replace(/<@!?\d+>|<@&\d+>|<#\d+>/g, "") // strip mentions/channels
-            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "") // strip emoji
-            .replace(/\s+/g, " ") // collapse whitespace/newlines
-            .trim();
-        }
         const ttsText = sanitizeForTTS(
           `Greetings players. ${entry.title}. ${entry.message}`,
         );
@@ -853,7 +855,7 @@ async function handleVoiceTranscript(guildId, userId, text) {
       "Sorry, I couldn't think of a response.";
     history.push({ role: "assistant", content: reply });
 
-    speakInVoice(guildId, reply, "tl");
+    speakInVoice(guildId, sanitizeForTTS(reply), "tl");
 
     if (listenedChannelId) {
       const channel = await client.channels
