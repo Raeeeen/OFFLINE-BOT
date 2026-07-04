@@ -97,7 +97,25 @@ if (!TOKEN || !CLIENT_ID || !MONGODB_URI || !process.env.GROQ_API_KEY) {
   console.error("❌ Missing DISCORD_TOKEN, CLIENT_ID, or MONGODB_URI in .env");
   process.exit(1);
 }
-const WAKE_WORDS = ["offline", "off line", "of line"];
+const WAKE_WORDS = [
+  "offline",
+  "off line",
+  "of line",
+  "upline",
+  "up line",
+  "afline",
+  "af line",
+  "opline",
+  "op line",
+  "obline",
+  "ob line",
+  "aupline",
+  "aup line",
+  "oofline",
+  "oof line",
+  "apline",
+  "ap line",
+];
 
 // Returns { index, matched } of the first wake word found, or null
 function findWakeWord(lowerText) {
