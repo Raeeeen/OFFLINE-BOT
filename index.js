@@ -47,6 +47,11 @@ const mongoose = require("mongoose");
 const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
 const fs = require("fs");
 const path = require("path");
+const { createClient } = require("@supabase/supabase-js");
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+);
 
 async function getSpotifyTrackName(url) {
   const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
@@ -153,6 +158,7 @@ const scheduleSchema = new mongoose.Schema({
   scheduledAt: { type: Number, required: true },
   message: { type: String, default: "" },
   images: { type: [String], default: [] },
+  imagePaths: { type: [String], default: [] },
   messageId: { type: String, default: null },
   deleteAt: { type: Number, default: null },
 });
@@ -569,7 +575,7 @@ async function scheduleAnnouncement(entry) {
         deleteAt: Date.now() + deleteDelay,
       });
 
-      scheduleDelete(entry.id, msg.id, entry.channelId, deleteDelay);
+      scheduleDelete(entry.id, msg.id, entry.channelId, deleteDelay, entry.imagePaths);
     } catch (err) {
       console.error(`❌ Failed to send announcement ${entry.id}:`, err);
     }
@@ -578,13 +584,28 @@ async function scheduleAnnouncement(entry) {
   activeTimers.set(entry.id, sendTimer);
 }
 
-function scheduleDelete(entryId, messageId, channelId, delay) {
+function scheduleDelete(entryId, messageId, channelId, delay, imagePaths = []) {
   const t = setTimeout(async () => {
     try {
       const channel = await client.channels.fetch(channelId);
       const msg = await channel.messages.fetch(messageId);
       await msg.delete();
     } catch {}
+
+    if (imagePaths.length > 0) {
+      try {
+        const { error } = await supabase.storage
+          .from("announcement-images")
+          .remove(imagePaths);
+        if (error) {
+          console.error("❌ Failed to delete images from Supabase:", error.message);
+        } else {
+          console.log(`🗑️ Deleted ${imagePaths.length} image(s) from Supabase`);
+        }
+      } catch (err) {
+        console.error("❌ Supabase cleanup error:", err.message);
+      }
+    }
 
     await deleteSchedule(entryId);
     activeTimers.delete(entryId);
@@ -619,6 +640,7 @@ async function restoreSchedules() {
           entry.messageId,
           entry.channelId,
           entry.deleteAt - now,
+          entry.imagePaths,
         );
       } else {
         toDelete.push(entry.id);
@@ -1624,6 +1646,7 @@ http
             mention: d.mention || null,
             sendAt: d.sendAt,
             images: d.images || [],
+            imagePaths: d.imagePaths || [],
             scheduledBy: d.scheduledBy || "guild-manager",
             scheduledAt: Date.now(),
           };
