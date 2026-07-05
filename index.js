@@ -575,7 +575,13 @@ async function scheduleAnnouncement(entry) {
         deleteAt: Date.now() + deleteDelay,
       });
 
-      scheduleDelete(entry.id, msg.id, entry.channelId, deleteDelay, entry.imagePaths);
+      scheduleDelete(
+        entry.id,
+        msg.id,
+        entry.channelId,
+        deleteDelay,
+        entry.imagePaths,
+      );
     } catch (err) {
       console.error(`❌ Failed to send announcement ${entry.id}:`, err);
     }
@@ -598,7 +604,10 @@ function scheduleDelete(entryId, messageId, channelId, delay, imagePaths = []) {
           .from("announcement-images")
           .remove(imagePaths);
         if (error) {
-          console.error("❌ Failed to delete images from Supabase:", error.message);
+          console.error(
+            "❌ Failed to delete images from Supabase:",
+            error.message,
+          );
         } else {
           console.log(`🗑️ Deleted ${imagePaths.length} image(s) from Supabase`);
         }
@@ -1594,7 +1603,7 @@ mongoose
     process.exit(1);
   });
 
-  const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET;
+const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET;
 
 function sendJson(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -1618,7 +1627,9 @@ http
       const guildId = url.searchParams.get("guildId");
       try {
         const all = await loadSchedules();
-        const filtered = guildId ? all.filter((s) => s.guildId === guildId) : all;
+        const filtered = guildId
+          ? all.filter((s) => s.guildId === guildId)
+          : all;
         return sendJson(res, 200, filtered);
       } catch (e) {
         return sendJson(res, 500, { error: e.message });
@@ -1635,7 +1646,9 @@ http
             return sendJson(res, 400, { error: "Missing required fields" });
           }
           if (d.sendAt <= Date.now()) {
-            return sendJson(res, 400, { error: "sendAt must be in the future" });
+            return sendJson(res, 400, {
+              error: "sendAt must be in the future",
+            });
           }
           const entry = {
             id: genId(),
@@ -1662,10 +1675,44 @@ http
 
     if (req.method === "DELETE" && req.url.startsWith("/api/announcements/")) {
       const id = req.url.split("/").pop();
-      if (activeTimers.has(id)) { clearTimeout(activeTimers.get(id)); activeTimers.delete(id); }
-      if (deleteTimers.has(id)) { clearTimeout(deleteTimers.get(id)); deleteTimers.delete(id); }
-      await deleteSchedule(id);
-      return sendJson(res, 200, { success: true });
+
+      if (activeTimers.has(id)) {
+        clearTimeout(activeTimers.get(id));
+        activeTimers.delete(id);
+      }
+      if (deleteTimers.has(id)) {
+        clearTimeout(deleteTimers.get(id));
+        deleteTimers.delete(id);
+      }
+
+      try {
+        const entry = await Schedule.findOne({ id }).lean();
+
+        if (entry?.imagePaths?.length > 0) {
+          const { error } = await supabase.storage
+            .from("announcement-images")
+            .remove(entry.imagePaths);
+          if (error) {
+            console.error(
+              `❌ Failed to delete images for ${id}:`,
+              error.message,
+            );
+          } else {
+            console.log(
+              `🗑️ Deleted ${entry.imagePaths.length} image(s) for cancelled announcement ${id}`,
+            );
+          }
+        }
+
+        await deleteSchedule(id);
+        return sendJson(res, 200, {
+          success: true,
+          imagesDeleted: entry?.imagePaths?.length || 0,
+        });
+      } catch (err) {
+        console.error(`❌ Failed to cancel announcement ${id}:`, err.message);
+        return sendJson(res, 500, { error: "Failed to cancel announcement" });
+      }
     }
 
     sendJson(res, 404, { error: "Not found" });
