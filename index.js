@@ -1556,20 +1556,6 @@ client.on(Events.MessageCreate, async (message) => {
   );
 });
 
-// HTTP Keep-Alive
-
-const http = require("http");
-http
-  .createServer((req, res) => {
-    res.writeHead(200);
-    res.end("Bot is alive!");
-  })
-  .listen(process.env.PORT || 3000, () =>
-    console.log(`🌐 HTTP server running on port ${process.env.PORT || 3000}`),
-  );
-
-// Connect to MongoDB, then start bot
-
 mongoose
   .connect(MONGODB_URI)
   .then(() => {
@@ -1585,3 +1571,82 @@ mongoose
     console.error("❌ Startup error:", err);
     process.exit(1);
   });
+
+  const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET;
+
+function sendJson(res, status, data) {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(data));
+}
+
+const http = require("http");
+http
+  .createServer(async (req, res) => {
+    if (req.url === "/" && req.method === "GET") {
+      res.writeHead(200);
+      return res.end("Bot is alive!");
+    }
+
+    if (req.headers["x-api-key"] !== INTERNAL_API_SECRET) {
+      return sendJson(res, 401, { error: "Unauthorized" });
+    }
+
+    if (req.method === "GET" && req.url.startsWith("/api/announcements")) {
+      const url = new URL(req.url, "http://internal");
+      const guildId = url.searchParams.get("guildId");
+      try {
+        const all = await loadSchedules();
+        const filtered = guildId ? all.filter((s) => s.guildId === guildId) : all;
+        return sendJson(res, 200, filtered);
+      } catch (e) {
+        return sendJson(res, 500, { error: e.message });
+      }
+    }
+
+    if (req.method === "POST" && req.url === "/api/announcements") {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", async () => {
+        try {
+          const d = JSON.parse(body);
+          if (!d.channelId || !d.guildId || !d.title || !d.sendAt) {
+            return sendJson(res, 400, { error: "Missing required fields" });
+          }
+          if (d.sendAt <= Date.now()) {
+            return sendJson(res, 400, { error: "sendAt must be in the future" });
+          }
+          const entry = {
+            id: genId(),
+            channelId: d.channelId,
+            guildId: d.guildId,
+            title: d.title,
+            message: d.message || "",
+            mention: d.mention || null,
+            sendAt: d.sendAt,
+            images: d.images || [],
+            scheduledBy: d.scheduledBy || "guild-manager",
+            scheduledAt: Date.now(),
+          };
+          await saveSchedule(entry);
+          scheduleAnnouncement(entry);
+          return sendJson(res, 201, entry);
+        } catch (e) {
+          return sendJson(res, 400, { error: e.message });
+        }
+      });
+      return;
+    }
+
+    if (req.method === "DELETE" && req.url.startsWith("/api/announcements/")) {
+      const id = req.url.split("/").pop();
+      if (activeTimers.has(id)) { clearTimeout(activeTimers.get(id)); activeTimers.delete(id); }
+      if (deleteTimers.has(id)) { clearTimeout(deleteTimers.get(id)); deleteTimers.delete(id); }
+      await deleteSchedule(id);
+      return sendJson(res, 200, { success: true });
+    }
+
+    sendJson(res, 404, { error: "Not found" });
+  })
+  .listen(process.env.PORT || 3000, () =>
+    console.log(`🌐 HTTP server running on port ${process.env.PORT || 3000}`),
+  );
