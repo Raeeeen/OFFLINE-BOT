@@ -164,6 +164,12 @@ const scheduleSchema = new mongoose.Schema({
 });
 
 const Schedule = mongoose.model("Schedule", scheduleSchema);
+const partyDisplaySchema = new mongoose.Schema({
+  guildId: { type: String, required: true, unique: true },
+  channelId: { type: String, required: true },
+  messageId: { type: String, required: true },
+});
+const PartyDisplay = mongoose.model("PartyDisplay", partyDisplaySchema);
 
 // DB Helpers
 
@@ -688,6 +694,7 @@ client.once(Events.ClientReady, () => {
   restoreSchedules().catch((err) =>
     console.error("❌ Failed to restore schedules:", err),
   );
+  watchPartyMakerChanges();
 });
 
 async function playNextSong(guildId) {
@@ -1021,6 +1028,50 @@ async function joinAndWatch(guildId, voiceChannel, guild) {
   return connection;
 }
 
+async function buildPartyEmbeds(guild) {
+  const db = mongoose.connection.db;
+  const partyDoc = await db
+    .collection("partyMaker")
+    .findOne({ _id: "current" });
+
+  if (!partyDoc || !partyDoc.parties || partyDoc.parties.length === 0) {
+    return null;
+  }
+
+  const { parties, partySize } = partyDoc;
+
+  const embeds = await Promise.all(
+    parties.map(async (party) => {
+      const memberLines = await Promise.all(
+        (party.memberIds || []).map(async (memberId, index) => {
+          try {
+            const member = await guild.members.fetch(memberId);
+            return `${index + 1}. ${member.displayName}`;
+          } catch {
+            return `${index + 1}. Unknown Member`;
+          }
+        }),
+      );
+
+      const filled = party.memberIds?.length ?? 0;
+      const slots = partySize ?? 5;
+      for (let i = filled + 1; i <= slots; i++) {
+        memberLines.push(`${i}. *(empty)*`);
+      }
+
+      return {
+        title: `🎮 ${party.name} — ${filled}/${slots}`,
+        description: memberLines.join("\n") || "*(no members)*",
+        color: filled >= slots ? 0x22c55e : 0x6366f1,
+      };
+    }),
+  );
+
+  const content = `📋 **Party List** — ${parties.length} part${parties.length === 1 ? "y" : "ies"} • ${partySize ?? 5} players max`;
+
+  return { content, embeds };
+}
+
 client.on(Events.InteractionCreate, async (interaction) => {
   // /join
   if (interaction.isChatInputCommand() && interaction.commandName === "join") {
@@ -1068,63 +1119,49 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await interaction.deferReply({ ephemeral: true });
 
     const channel = interaction.options.getChannel("channel");
+    const guild = interaction.guild;
 
-    let partyDoc;
+    let built;
     try {
-      const db = mongoose.connection.db;
-      partyDoc = await db.collection("partyMaker").findOne({ _id: "current" });
+      built = await buildPartyEmbeds(guild);
     } catch (err) {
       console.error("❌ Failed to load parties:", err.message);
       return interaction.editReply("❌ Failed to load parties from database.");
     }
 
-    if (!partyDoc || !partyDoc.parties || partyDoc.parties.length === 0) {
+    if (!built) {
       return interaction.editReply(
         "❌ No parties found. Set them up in the Party Maker first.",
       );
     }
 
-    const { parties, partySize } = partyDoc;
-
-    // Fetch guild members to resolve IDs to names/avatars
-    const guild = interaction.guild;
-
-    const embeds = await Promise.all(
-      parties.map(async (party) => {
-        const memberLines = await Promise.all(
-          (party.memberIds || []).map(async (memberId, index) => {
-            try {
-              const member = await guild.members.fetch(memberId);
-              return `${index + 1}. ${member.displayName}`;
-            } catch {
-              return `${index + 1}. Unknown Member`;
-            }
-          }),
-        );
-
-        const filled = party.memberIds?.length ?? 0;
-        const slots = partySize ?? 5;
-        const empty = slots - filled;
-
-        // Fill remaining slots visually
-        for (let i = filled + 1; i <= slots; i++) {
-          memberLines.push(`${i}. *(empty)*`);
-        }
-
-        return {
-          title: `🎮 ${party.name} — ${filled}/${slots}`,
-          description: memberLines.join("\n") || "*(no members)*",
-          color: filled >= slots ? 0x22c55e : 0x6366f1, // green if full, indigo otherwise
-        };
-      }),
-    );
+    // Remove the old live message, wherever it was
+    const existing = await PartyDisplay.findOne({ guildId: guild.id });
+    if (existing) {
+      try {
+        const oldChannel = await client.channels.fetch(existing.channelId);
+        const oldMsg = await oldChannel.messages.fetch(existing.messageId);
+        await oldMsg.delete();
+      } catch {
+        // already gone / no perms — ignore
+      }
+    }
 
     try {
-      await channel.send({
-        content: `📋 **Party List** — ${parties.length} part${parties.length === 1 ? "y" : "ies"} • ${partySize ?? 5} players max`,
-        embeds,
+      const msg = await channel.send({
+        content: built.content,
+        embeds: built.embeds,
       });
-      return interaction.editReply(`✅ Party list posted in <#${channel.id}>!`);
+
+      await PartyDisplay.findOneAndUpdate(
+        { guildId: guild.id },
+        { guildId: guild.id, channelId: channel.id, messageId: msg.id },
+        { upsert: true },
+      );
+
+      return interaction.editReply(
+        `✅ Live party list posted in <#${channel.id}>! It'll update automatically whenever the Party Maker changes.`,
+      );
     } catch (err) {
       console.error("❌ Failed to send party display:", err.message);
       return interaction.editReply(
@@ -1804,3 +1841,68 @@ http
   .listen(process.env.PORT || 3000, () =>
     console.log(`🌐 HTTP server running on port ${process.env.PORT || 3000}`),
   );
+
+let partyChangeDebounce = null;
+
+async function updateAllPartyDisplays() {
+  const displays = await PartyDisplay.find({}).lean();
+
+  for (const display of displays) {
+    try {
+      const guild = await client.guilds.fetch(display.guildId);
+      const built = await buildPartyEmbeds(guild);
+      const channel = await client.channels.fetch(display.channelId);
+      const msg = await channel.messages.fetch(display.messageId);
+
+      if (!built) {
+        await msg.edit({
+          content: "📭 No parties currently set up.",
+          embeds: [],
+        });
+        continue;
+      }
+
+      await msg.edit({ content: built.content, embeds: built.embeds });
+    } catch (err) {
+      console.error(
+        `⚠️ Failed to update party display for guild ${display.guildId}:`,
+        err.message,
+      );
+      if (err.code === 10008 || err.code === 10003) {
+        await PartyDisplay.deleteOne({ guildId: display.guildId }).catch(
+          () => {},
+        );
+      }
+    }
+  }
+}
+
+function schedulePartyDisplayUpdate() {
+  clearTimeout(partyChangeDebounce);
+  partyChangeDebounce = setTimeout(() => {
+    updateAllPartyDisplays().catch((err) =>
+      console.error("❌ Failed to update party displays:", err.message),
+    );
+  }, 500);
+}
+
+function watchPartyMakerChanges() {
+  const collection = mongoose.connection.db.collection("partyMaker");
+  const changeStream = collection.watch([
+    { $match: { "documentKey._id": "current" } },
+  ]);
+
+  changeStream.on("change", () => {
+    schedulePartyDisplayUpdate();
+  });
+
+  changeStream.on("error", (err) => {
+    console.error(
+      "⚠️ Party change stream error, reconnecting in 5s:",
+      err.message,
+    );
+    setTimeout(watchPartyMakerChanges, 5000);
+  });
+
+  console.log("👀 Watching partyMaker collection for changes");
+}
