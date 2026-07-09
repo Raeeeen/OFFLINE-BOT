@@ -1045,7 +1045,7 @@ async function buildPartyEmbeds(guild) {
     return null;
   }
 
-  const { parties, partySize } = partyDoc;
+  const { parties, partySize, title, date, time } = partyDoc;
 
   const totalFilled = parties.reduce(
     (sum, p) => sum + (p.members?.length ?? 0),
@@ -1081,24 +1081,30 @@ async function buildPartyEmbeds(guild) {
     }
   });
 
+  const scheduleLine =
+    date || time
+      ? `📅 **${date ?? "TBD"}**  •  🕐 **${time ?? "TBD"}**\n`
+      : "";
+
   const embed = {
     author: {
       name: guild.name,
       icon_url: guild.iconURL() ?? undefined,
     },
-    title: "🗡️  Party Sign-Ups",
+    title: `🗡️  ${title || "Party Sign-Ups"}`,
     description:
+      `${scheduleLine}` +
       `**${parties.length}** part${parties.length === 1 ? "y" : "ies"} • ` +
       `**${totalFilled}/${totalSlots}** players signed up\n` +
       `${"▬".repeat(20)}`,
-    color: allFull ? 0x22c55e : 0x5865f2, // Discord blurple to match RaidHelper's default look
+    color: allFull ? 0x22c55e : 0x5865f2,
     fields,
     thumbnail: { url: guild.iconURL() ?? undefined },
     footer: { text: "Last updated" },
     timestamp: new Date().toISOString(),
   };
 
-  const content = null; // RaidHelper posts embed-only, no plain text line above it
+  const content = null;
 
   return { content, embeds: [embed] };
 }
