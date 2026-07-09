@@ -447,6 +447,18 @@ const commands = [
     .setName("voicepanel")
     .setDescription("Show the voice reply toggle button again")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder()
+    .setName("partydisplay")
+    .setDescription("Display current parties in a channel")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addChannelOption((opt) =>
+      opt
+        .setName("channel")
+        .setDescription("Channel to post the party list in")
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(true),
+    ),
 ].map((cmd) => cmd.toJSON());
 
 // Time Parsing
@@ -1046,6 +1058,78 @@ client.on(Events.InteractionCreate, async (interaction) => {
           "❌ Failed to join the voice channel. Make sure I have permission to connect.",
         ephemeral: true,
       });
+    }
+  }
+
+  if (
+    interaction.isChatInputCommand() &&
+    interaction.commandName === "partydisplay"
+  ) {
+    await interaction.deferReply({ ephemeral: true });
+
+    const channel = interaction.options.getChannel("channel");
+
+    let partyDoc;
+    try {
+      const db = mongoose.connection.db;
+      partyDoc = await db.collection("partyMaker").findOne({ _id: "current" });
+    } catch (err) {
+      console.error("❌ Failed to load parties:", err.message);
+      return interaction.editReply("❌ Failed to load parties from database.");
+    }
+
+    if (!partyDoc || !partyDoc.parties || partyDoc.parties.length === 0) {
+      return interaction.editReply(
+        "❌ No parties found. Set them up in the Party Maker first.",
+      );
+    }
+
+    const { parties, partySize } = partyDoc;
+
+    // Fetch guild members to resolve IDs to names/avatars
+    const guild = interaction.guild;
+
+    const embeds = await Promise.all(
+      parties.map(async (party) => {
+        const memberLines = await Promise.all(
+          (party.memberIds || []).map(async (memberId, index) => {
+            try {
+              const member = await guild.members.fetch(memberId);
+              return `${index + 1}. ${member.displayName}`;
+            } catch {
+              return `${index + 1}. Unknown Member`;
+            }
+          }),
+        );
+
+        const filled = party.memberIds?.length ?? 0;
+        const slots = partySize ?? 5;
+        const empty = slots - filled;
+
+        // Fill remaining slots visually
+        for (let i = filled + 1; i <= slots; i++) {
+          memberLines.push(`${i}. *(empty)*`);
+        }
+
+        return {
+          title: `🎮 ${party.name} — ${filled}/${slots}`,
+          description: memberLines.join("\n") || "*(no members)*",
+          color: filled >= slots ? 0x22c55e : 0x6366f1, // green if full, indigo otherwise
+        };
+      }),
+    );
+
+    try {
+      await channel.send({
+        content: `📋 **Party List** — ${parties.length} part${parties.length === 1 ? "y" : "ies"} • ${partySize ?? 5} players max`,
+        embeds,
+      });
+      return interaction.editReply(`✅ Party list posted in <#${channel.id}>!`);
+    } catch (err) {
+      console.error("❌ Failed to send party display:", err.message);
+      return interaction.editReply(
+        "❌ I don't have permission to post in that channel.",
+      );
     }
   }
 
