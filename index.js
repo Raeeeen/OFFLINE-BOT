@@ -1035,6 +1035,29 @@ const ROLE_EMOJI = {
   Hybrid: "🔄",
 };
 
+function formatFriendlyDate(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (isNaN(d.getTime())) return dateStr; // fallback: show raw string if unparseable
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function formatTime12h(timeStr) {
+  if (!timeStr) return null;
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return timeStr; // fallback: show raw string if unparseable
+  let hours = parseInt(match[1], 10);
+  const minutes = match[2];
+  const period = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${hours}:${minutes} ${period}`;
+}
+
 async function buildPartyEmbeds(guild) {
   const db = mongoose.connection.db;
   const partyDoc = await db
@@ -1081,9 +1104,12 @@ async function buildPartyEmbeds(guild) {
     }
   });
 
+  const friendlyDate = formatFriendlyDate(date);
+  const friendlyTime = formatTime12h(time);
+
   const scheduleLine =
-    date || time
-      ? `📅 **${date ?? "TBD"}**  •  🕐 **${time ?? "TBD"}**\n`
+    friendlyDate || friendlyTime
+      ? `📅 **${friendlyDate ?? "TBD"}**  •  🕐 **${friendlyTime ?? "TBD"}**\n`
       : "";
 
   const embed = {
@@ -1091,7 +1117,7 @@ async function buildPartyEmbeds(guild) {
       name: guild.name,
       icon_url: guild.iconURL() ?? undefined,
     },
-    title: `🗡️  ${title || "Party Sign-Ups"}`,
+    title: ` ${title || "Party Sign-Ups"}`,
     description:
       `${scheduleLine}` +
       `**${parties.length}** part${parties.length === 1 ? "y" : "ies"} • ` +
