@@ -1047,32 +1047,62 @@ async function buildPartyEmbeds(guild) {
 
   const { parties, partySize } = partyDoc;
 
-  const embeds = parties.map((party) => {
+  const totalFilled = parties.reduce(
+    (sum, p) => sum + (p.members?.length ?? 0),
+    0,
+  );
+  const totalSlots = parties.length * (partySize ?? 5);
+  const allFull = totalFilled >= totalSlots;
+
+  const fields = [];
+
+  parties.forEach((party, i) => {
     const filled = party.members?.length ?? 0;
     const slots = partySize ?? 5;
 
     const memberLines = (party.members || []).map((member, index) => {
       const emoji = ROLE_EMOJI[member.assignmentRole] || "❓";
-      const roleLabel = member.assignmentRole || "Unassigned";
-      return `**${index + 1}.** <@${member.id}> — ${emoji} ${roleLabel}`;
+      return `\`${index + 1}\` ${emoji} <@${member.id}>`;
     });
 
-    for (let i = filled + 1; i <= slots; i++) {
-      memberLines.push(`**${i}.** *(empty)*`);
+    for (let j = filled + 1; j <= slots; j++) {
+      memberLines.push(`\`${j}\` ➕ *open slot*`);
     }
 
-    return {
-      title: `${filled >= slots ? "✅" : "🎮"} ${party.name}`,
-      description: memberLines.join("\n") || "*(no members)*",
-      color: filled >= slots ? 0x22c55e : 0x6366f1,
-      footer: { text: `${filled}/${slots} players` },
-    };
+    fields.push({
+      name: `${filled >= slots ? "✅" : "🔸"}  ${party.name}  •  ${filled}/${slots}`,
+      value: memberLines.join("\n") || "*(no members)*",
+      inline: true,
+    });
+
+    // Force a row break after every 2 party cards
+    if (i % 2 === 1 && i !== parties.length - 1) {
+      fields.push({ name: "\u200b", value: "\u200b", inline: true });
+    }
   });
 
-  const content = `📋 **Party List** — ${parties.length} part${parties.length === 1 ? "y" : "ies"} • ${partySize ?? 5} players max`;
+  const embed = {
+    author: {
+      name: guild.name,
+      icon_url: guild.iconURL() ?? undefined,
+    },
+    title: "🗡️  Party Sign-Ups",
+    description:
+      `**${parties.length}** part${parties.length === 1 ? "y" : "ies"} • ` +
+      `**${totalFilled}/${totalSlots}** players signed up\n` +
+      `${"▬".repeat(20)}`,
+    color: allFull ? 0x22c55e : 0x5865f2, // Discord blurple to match RaidHelper's default look
+    fields,
+    thumbnail: { url: guild.iconURL() ?? undefined },
+    footer: { text: "Last updated" },
+    timestamp: new Date().toISOString(),
+  };
 
-  return { content, embeds };
+  const content = null; // RaidHelper posts embed-only, no plain text line above it
+
+  return { content, embeds: [embed] };
 }
+
 client.on(Events.InteractionCreate, async (interaction) => {
   // /join
   if (interaction.isChatInputCommand() && interaction.commandName === "join") {
@@ -1863,7 +1893,12 @@ async function updateAllPartyDisplays() {
         continue;
       }
 
-      await msg.edit({ content: built.content, embeds: built.embeds });
+      // in updateAllPartyDisplays(), only this line changes:
+      await msg.edit({
+        content: built.content,
+        embeds: built.embeds,
+        allowedMentions: { parse: [] }, // ← suppress notification pings on refresh edits
+      });
     } catch (err) {
       console.error(
         `⚠️ Failed to update party display for guild ${display.guildId}:`,
