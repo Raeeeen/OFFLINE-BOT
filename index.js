@@ -1121,7 +1121,7 @@ async function buildPartyEmbeds(guild) {
     description:
       `${scheduleLine}` +
       `**${parties.length}** part${parties.length === 1 ? "y" : "ies"} • ` +
-      `**${totalFilled}/${totalSlots}**` +
+      `**${totalFilled}/${totalSlots}** \n` +
       `${"▬".repeat(20)}`,
     color: allFull ? 0x22c55e : 0x5865f2,
     fields,
