@@ -1040,36 +1040,32 @@ async function buildPartyEmbeds(guild) {
 
   const { parties, partySize } = partyDoc;
 
-  const embeds = await Promise.all(
-    parties.map(async (party) => {
-      const memberLines = await Promise.all(
-        (party.memberIds || []).map(async (memberId, index) => {
-          try {
-            const member = await guild.members.fetch(memberId);
-            return `${index + 1}. ${member.displayName}`;
-          } catch {
-            return `${index + 1}. Unknown Member`;
-          }
-        }),
-      );
+  const fields = parties.map((party) => {
+    const memberLines = (party.memberIds || []).map(
+      (memberId, index) => `${index + 1}. <@${memberId}>`,
+    );
 
-      const filled = party.memberIds?.length ?? 0;
-      const slots = partySize ?? 5;
-      for (let i = filled + 1; i <= slots; i++) {
-        memberLines.push(`${i}. *(empty)*`);
-      }
+    const filled = party.memberIds?.length ?? 0;
+    const slots = partySize ?? 5;
+    for (let i = filled + 1; i <= slots; i++) {
+      memberLines.push(`${i}. *(empty)*`);
+    }
 
-      return {
-        title: `🎮 ${party.name} — ${filled}/${slots}`,
-        description: memberLines.join("\n") || "*(no members)*",
-        color: filled >= slots ? 0x22c55e : 0x6366f1,
-      };
-    }),
-  );
+    return {
+      name: `${filled >= slots ? "✅" : "👥"} ${party.name} — ${filled}/${slots}`,
+      value: memberLines.join("\n") || "*(no members)*",
+      inline: true, // ← Discord wraps these 3-per-row automatically
+    };
+  });
+
+  const embed = {
+    color: 0x6366f1,
+    fields,
+  };
 
   const content = `📋 **Party List** — ${parties.length} part${parties.length === 1 ? "y" : "ies"} • ${partySize ?? 5} players max`;
 
-  return { content, embeds };
+  return { content, embeds: [embed] };
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {
