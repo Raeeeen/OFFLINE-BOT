@@ -1028,6 +1028,13 @@ async function joinAndWatch(guildId, voiceChannel, guild) {
   return connection;
 }
 
+const ROLE_EMOJI = {
+  Tank: "🛡️",
+  Dps: "⚔️",
+  Support: "💊",
+  Hybrid: "🔄",
+};
+
 async function buildPartyEmbeds(guild) {
   const db = mongoose.connection.db;
   const partyDoc = await db
@@ -1040,34 +1047,32 @@ async function buildPartyEmbeds(guild) {
 
   const { parties, partySize } = partyDoc;
 
-  const fields = parties.map((party) => {
-    const memberLines = (party.memberIds || []).map(
-      (memberId, index) => `${index + 1}. <@${memberId}>`,
-    );
-
-    const filled = party.memberIds?.length ?? 0;
+  const embeds = parties.map((party) => {
+    const filled = party.members?.length ?? 0;
     const slots = partySize ?? 5;
+
+    const memberLines = (party.members || []).map((member, index) => {
+      const emoji = ROLE_EMOJI[member.assignmentRole] || "❓";
+      const roleLabel = member.assignmentRole || "Unassigned";
+      return `**${index + 1}.** <@${member.id}> — ${emoji} ${roleLabel}`;
+    });
+
     for (let i = filled + 1; i <= slots; i++) {
-      memberLines.push(`${i}. *(empty)*`);
+      memberLines.push(`**${i}.** *(empty)*`);
     }
 
     return {
-      name: `${filled >= slots ? "✅" : "👥"} ${party.name} — ${filled}/${slots}`,
-      value: memberLines.join("\n") || "*(no members)*",
-      inline: true, // ← Discord wraps these 3-per-row automatically
+      title: `${filled >= slots ? "✅" : "🎮"} ${party.name}`,
+      description: memberLines.join("\n") || "*(no members)*",
+      color: filled >= slots ? 0x22c55e : 0x6366f1,
+      footer: { text: `${filled}/${slots} players` },
     };
   });
 
-  const embed = {
-    color: 0x6366f1,
-    fields,
-  };
-
   const content = `📋 **Party List** — ${parties.length} part${parties.length === 1 ? "y" : "ies"} • ${partySize ?? 5} players max`;
 
-  return { content, embeds: [embed] };
+  return { content, embeds };
 }
-
 client.on(Events.InteractionCreate, async (interaction) => {
   // /join
   if (interaction.isChatInputCommand() && interaction.commandName === "join") {
