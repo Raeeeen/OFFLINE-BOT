@@ -1,20 +1,9 @@
 require("dotenv").config();
 require("ffmpeg-static");
 require("discord.js");
-const playdl = require("play-dl");
 const prism = require("prism-media");
 const ffmpegPath = require("ffmpeg-static");
 process.env.FFMPEG_PATH = ffmpegPath;
-
-(async () => {
-  try {
-    const clientID = await playdl.getFreeClientID();
-    await playdl.setToken({ soundcloud: { client_id: clientID } });
-    console.log("✅ SoundCloud client ID set");
-  } catch (err) {
-    console.error("⚠️ Failed to set SoundCloud client ID:", err.message);
-  }
-})();
 
 const {
   Client,
@@ -26,9 +15,9 @@ const {
   PermissionFlagsBits,
   ChannelType,
   AttachmentBuilder,
-  ActionRowBuilder, // ← add
-  ButtonBuilder, // ← add
-  ButtonStyle, // ← add
+  ActionRowBuilder, 
+  ButtonBuilder, 
+  ButtonStyle, 
 } = require("discord.js");
 const {
   joinVoiceChannel,
@@ -39,7 +28,7 @@ const {
   entersState,
   getVoiceConnection,
   StreamType,
-  EndBehaviorType, // ← add
+  EndBehaviorType,
 } = require("@discordjs/voice");
 const fetch = (...args) =>
   import("node-fetch").then(({ default: f }) => f(...args));
@@ -53,40 +42,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY,
 );
 
-async function getSpotifyTrackName(url) {
-  const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization:
-        "Basic " +
-        Buffer.from(
-          process.env.SPOTIFY_CLIENT_ID +
-            ":" +
-            process.env.SPOTIFY_CLIENT_SECRET,
-        ).toString("base64"),
-    },
-    body: "grant_type=client_credentials",
-  });
-
-  const rawText = await tokenRes.text(); // ← read as text first
-  console.log("🎵 Spotify token response:", rawText); // ← log it
-  const { access_token } = JSON.parse(rawText);
-
-  const trackId = url.split("/track/")[1]?.split("?")[0];
-  if (!trackId) throw new Error("Invalid Spotify track URL");
-
-  const trackRes = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
-    headers: { Authorization: `Bearer ${access_token}` },
-  });
-  const trackText = await trackRes.text();
-  console.log("🎵 Spotify track response:", trackText); // ← add this
-  const track = JSON.parse(trackText);
-  return `${track.name} ${track.artists[0].name}`;
-}
-
-const ttsQueues = new Map(); // guildId → string[]
-const ttsPlaying = new Map(); // guildId → true (semaphore)
+const ttsQueues = new Map(); 
+const ttsPlaying = new Map(); 
 const ttsEnabled = new Map();
 const ttsPlayers = new Map();
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -96,8 +53,6 @@ const Groq = require("groq-sdk");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const { toFile } = require("groq-sdk");
 const conversationHistory = new Map();
-const musicQueues = new Map(); // guildId → [{ title, url }]
-const musicPlayers = new Map(); // guildId → AudioPlayer
 if (!TOKEN || !CLIENT_ID || !MONGODB_URI || !process.env.GROQ_API_KEY) {
   console.error("❌ Missing DISCORD_TOKEN, CLIENT_ID, or MONGODB_URI in .env");
   process.exit(1);
@@ -122,7 +77,6 @@ const WAKE_WORDS = [
   "ap line",
 ];
 
-// Returns { index, matched } of the first wake word found, or null
 function findWakeWord(lowerText) {
   for (const w of WAKE_WORDS) {
     const idx = lowerText.indexOf(w);
@@ -146,6 +100,7 @@ function sanitizeForTTS(text) {
 const subscribedUsers = new Map();
 const voiceListenEnabled = new Map();
 const transcribeQueues = new Map();
+
 // MongoDB Schema
 const scheduleSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
@@ -170,8 +125,6 @@ const partyDisplaySchema = new mongoose.Schema({
   messageId: { type: String, required: true },
 });
 const PartyDisplay = mongoose.model("PartyDisplay", partyDisplaySchema);
-
-// DB Helpers
 
 async function loadSchedules() {
   try {
@@ -209,8 +162,6 @@ async function updateSchedule(entryId, fields) {
   }
 }
 
-// Discord Client
-
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -222,9 +173,6 @@ const client = new Client({
   partials: ["CHANNEL"],
 });
 
-// Voice State
-
-// guildId → { channelId }
 const voiceStates = new Map();
 
 const listenChannels = new Map();
@@ -249,11 +197,6 @@ async function processQueue(guildId) {
   }
 
   const tmpFile = path.join("/tmp", `tts_${Date.now()}.mp3`);
-
-  // Pick voice based on lang code you're already passing around
-  /** 
-  const voice = lang === "tl" ? "fil-PH-BlessicaNeural" : "en-US-AriaNeural";
-  */
   const voice = "en-US-AriaNeural";
 
   try {
@@ -333,7 +276,6 @@ function speakInVoice(guildId, text, lang = "en") {
   if (!ttsQueues.has(guildId)) ttsQueues.set(guildId, []);
   ttsQueues.get(guildId).push({ text, lang });
 
-  // Only kick off processQueue if nothing is playing right now
   if (!ttsPlaying.has(guildId)) {
     ttsPlaying.set(guildId, true);
     processQueue(guildId);
@@ -421,33 +363,10 @@ const commands = [
     .setDescription("Stop answering questions in the listened channel")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
-  // Add to commands array
   new SlashCommandBuilder()
     .setName("clearchat")
     .setDescription("Clear the conversation history in the listened channel")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
-
-  new SlashCommandBuilder()
-    .setName("play")
-    .setDescription("Play a song from YouTube or Spotify")
-    .addStringOption((opt) =>
-      opt
-        .setName("query")
-        .setDescription("YouTube/Spotify link or search term")
-        .setRequired(true),
-    ),
-
-  new SlashCommandBuilder()
-    .setName("skip")
-    .setDescription("Skip the current song"),
-
-  new SlashCommandBuilder()
-    .setName("stop")
-    .setDescription("Stop music and clear the queue"),
-
-  new SlashCommandBuilder()
-    .setName("queue")
-    .setDescription("Show the current music queue"),
 
   new SlashCommandBuilder()
     .setName("voicepanel")
@@ -466,8 +385,6 @@ const commands = [
         .setRequired(true),
     ),
 ].map((cmd) => cmd.toJSON());
-
-// Time Parsing
 
 function parseTime(input) {
   const trimmed = input.trim();
@@ -564,20 +481,17 @@ async function scheduleAnnouncement(entry) {
         }
       }
 
-      // Send text announcement
       const msg = await channel.send({
         content: textContent,
         files,
         allowedMentions: { parse: ["roles", "users", "everyone"] },
       });
 
-      // Speak in voice channel if bot is joined
       if (voiceStates.has(entry.guildId)) {
         const ttsText = sanitizeForTTS(
           `Greetings players. ${entry.title}. ${entry.message}`,
         );
         console.log(`🗣️ Sanitized TTS text: "${ttsText}"`);
-        // Priority: insert at front of queue
         if (!ttsQueues.has(entry.guildId)) ttsQueues.set(entry.guildId, []);
         ttsQueues.get(entry.guildId).unshift({ text: ttsText, lang: "en" });
 
@@ -688,7 +602,6 @@ async function restoreSchedules() {
 }
 
 // Events
-
 client.once(Events.ClientReady, () => {
   console.log(`🤖 Bot ready: ${client.user.tag}`);
   restoreSchedules().catch((err) =>
@@ -696,55 +609,6 @@ client.once(Events.ClientReady, () => {
   );
   watchPartyMakerChanges();
 });
-
-async function playNextSong(guildId) {
-  const queue = musicQueues.get(guildId);
-  if (!queue || queue.length === 0) {
-    musicQueues.delete(guildId);
-    musicPlayers.delete(guildId);
-    return;
-  }
-
-  const song = queue[0];
-  console.log(`🎵 Now playing: ${song.title}`);
-  const connection = getVoiceConnection(guildId);
-  if (!connection) return;
-
-  try {
-    const stream = await playdl.stream(song.url, { highWaterMark: 1 << 25 });
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type,
-      inlineVolume: false,
-    });
-
-    const oldPlayer = musicPlayers.get(guildId); // ← fixed
-    if (oldPlayer) {
-      oldPlayer.removeAllListeners();
-      oldPlayer.stop(true);
-    }
-
-    const player = createAudioPlayer();
-    musicPlayers.set(guildId, player); // ← fixed
-    connection.subscribe(player);
-
-    player.on(AudioPlayerStatus.Idle, () => {
-      queue.shift();
-      playNextSong(guildId);
-    });
-
-    player.on("error", (e) => {
-      console.error("❌ Music player error:", e.message);
-      queue.shift();
-      playNextSong(guildId);
-    });
-
-    player.play(resource); // ← only once, after listeners attached
-  } catch (e) {
-    console.error("❌ Failed to play song:", e.message);
-    queue.shift();
-    playNextSong(guildId);
-  }
-}
 
 function pcmToWav(pcmBuffer, sampleRate = 16000, channels = 1, bitDepth = 16) {
   const byteRate = (sampleRate * channels * bitDepth) / 8;
@@ -767,8 +631,8 @@ function pcmToWav(pcmBuffer, sampleRate = 16000, channels = 1, bitDepth = 16) {
 }
 
 function downsampleTo16kMono(buffer) {
-  const ratio = 3; // 48000 / 16000
-  const inSamples = buffer.length / 4; // 2 bytes * 2 channels
+  const ratio = 3;
+  const inSamples = buffer.length / 4; 
   const outSamples = Math.floor(inSamples / ratio);
   const out = Buffer.alloc(outSamples * 2);
   for (let i = 0; i < outSamples; i++) {
@@ -802,8 +666,7 @@ function startListeningToUser(guildId, userId, connection) {
     pcmChunks.push(chunk);
     const totalLen = pcmChunks.reduce((a, c) => a + c.length, 0);
     if (totalLen > 48000 * 4 * 15) {
-      // ~15 sec cap
-      opusStream.destroy(); // forces 'end' early, or you could just drop
+      opusStream.destroy(); 
     }
   });
 
@@ -826,14 +689,11 @@ function startListeningToUser(guildId, userId, connection) {
     cleanupSub();
     const pcm48kStereo = Buffer.concat(pcmChunks);
 
-    // ── Gate 1: minimum length (~0.8s) to contain the wake word "offline"
     if (pcm48kStereo.length < 48000 * 4 * 0.8) return;
 
-    // ── Gate 2: RMS energy check — skip silence/near-silence
     const rms = computeRMS(pcm48kStereo);
-    if (rms < 200) return; // tune this threshold to your mic (200 works for most)
+    if (rms < 200) return; 
 
-    // ── Gate 3: queue transcription so we never flood Groq in parallel
     enqueueTranscription(guildId, userId, pcm48kStereo);
   });
 }
@@ -854,7 +714,7 @@ async function enqueueTranscription(guildId, userId, pcm48kStereo) {
   transcribeQueues.set(
     guildId,
     next.catch(() => {}),
-  ); // swallow so chain never breaks
+  ); 
 }
 
 async function runTranscription(guildId, userId, pcm48kStereo, attempt = 0) {
@@ -872,7 +732,6 @@ async function runTranscription(guildId, userId, pcm48kStereo, attempt = 0) {
     const text = (transcription.text || "").trim();
     if (!text) return;
 
-    // ── Gate 4: local wake word check BEFORE doing anything else
     const hit = findWakeWord(text.toLowerCase());
     if (!hit) {
       console.log(`🔕 No wake word in: "${text.substring(0, 60)}"`);
@@ -884,7 +743,7 @@ async function runTranscription(guildId, userId, pcm48kStereo, attempt = 0) {
   } catch (err) {
     const is429 = err?.message?.includes("429") || err?.status === 429;
     if (is429 && attempt < 4) {
-      const delay = (attempt + 1) * 4000; // 4s, 8s, 12s, 16s
+      const delay = (attempt + 1) * 4000; 
       console.warn(
         `⚠️ Groq 429 — retrying in ${delay / 1000}s (attempt ${attempt + 1})`,
       );
@@ -906,7 +765,7 @@ async function handleVoiceTranscript(guildId, userId, text) {
 
   speakInVoice(guildId, "Hello player");
 
-  if (!query) return; // they just said the wake word alone, nothing to answer
+  if (!query) return; 
 
   const listenedChannelId = listenChannels.get(guildId);
   const historyKey = listenedChannelId || `voice-${guildId}`;
@@ -971,7 +830,6 @@ function detachVoiceListener(guildId) {
   subscribedUsers.delete(guildId);
 }
 
-// Put this above the /join handler
 async function joinAndWatch(guildId, voiceChannel, guild) {
   const connection = joinVoiceChannel({
     channelId: voiceChannel.id,
@@ -990,15 +848,13 @@ async function joinAndWatch(guildId, voiceChannel, guild) {
         entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
         entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
       ]);
-      // Connection recovered on its own — re-subscribe just in case
-      const player = musicPlayers.get(guildId);
+      const player = ttsPlayers.get(guildId);
       if (player) connection.subscribe(player);
     } catch {
       try {
         connection.destroy();
       } catch {}
 
-      // ★ Reset TTS state so it isn't stuck forever
       ttsPlaying.delete(guildId);
       const pendingQueue = ttsQueues.get(guildId);
 
@@ -1006,7 +862,6 @@ async function joinAndWatch(guildId, voiceChannel, guild) {
         console.log(`🔄 Rejoining voice channel...`);
         const newConnection = await joinAndWatch(guildId, voiceChannel, guild);
 
-        // ★ Resume TTS queue on the new connection if anything was pending
         if (
           pendingQueue &&
           pendingQueue.length > 0 &&
@@ -1038,7 +893,7 @@ const ROLE_EMOJI = {
 function formatFriendlyDate(dateStr) {
   if (!dateStr) return null;
   const d = new Date(`${dateStr}T00:00:00`);
-  if (isNaN(d.getTime())) return dateStr; // fallback: show raw string if unparseable
+  if (isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
@@ -1049,7 +904,7 @@ function formatFriendlyDate(dateStr) {
 function formatTime12h(timeStr) {
   if (!timeStr) return null;
   const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return timeStr; // fallback: show raw string if unparseable
+  if (!match) return timeStr;
   let hours = parseInt(match[1], 10);
   const minutes = match[2];
   const period = hours >= 12 ? "PM" : "AM";
@@ -1098,7 +953,6 @@ async function buildPartyEmbeds(guild) {
       inline: true,
     });
 
-    // Force a row break after every 2 party cards
     if (i % 2 === 1 && i !== parties.length - 1) {
       fields.push({ name: "\u200b", value: "\u200b", inline: true });
     }
@@ -1198,7 +1052,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       );
     }
 
-    // Remove the old live message, wherever it was
     const existing = await PartyDisplay.findOne({ guildId: guild.id });
     if (existing) {
       try {
@@ -1206,7 +1059,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const oldMsg = await oldChannel.messages.fetch(existing.messageId);
         await oldMsg.delete();
       } catch {
-        // already gone / no perms — ignore
+        // already gone 
       }
     }
 
@@ -1339,122 +1192,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     });
   }
 
-  // /play
-  if (interaction.isChatInputCommand() && interaction.commandName === "play") {
-    await interaction.deferReply();
-
-    const query = interaction.options.getString("query");
-    const member = interaction.member;
-    const voiceChannel = member?.voice?.channel;
-
-    if (!voiceChannel) {
-      return interaction.editReply(
-        "❌ You need to be in a voice channel first.",
-      );
-    }
-
-    if (!voiceStates.has(interaction.guildId)) {
-      try {
-        await joinAndWatch(
-          interaction.guildId,
-          voiceChannel,
-          interaction.guild,
-        );
-        voiceStates.set(interaction.guildId, { channelId: voiceChannel.id });
-      } catch (err) {
-        return interaction.editReply("❌ Failed to join your voice channel.");
-      }
-    }
-
-    try {
-      let searchQuery;
-      const isSpotifyUrl = query.includes("spotify.com");
-
-      if (isSpotifyUrl) {
-        searchQuery = await getSpotifyTrackName(query);
-      } else {
-        searchQuery = query;
-      }
-
-      // Search SoundCloud to verify and get real title
-      const results = await playdl.search(searchQuery, {
-        source: { soundcloud: "tracks" },
-        limit: 1,
-      });
-
-      if (!results.length)
-        return interaction.editReply("❌ No results found on SoundCloud.");
-
-      const songTitle = results[0].name || results[0].title || searchQuery;
-      const songUrl = results[0].url;
-
-      if (!musicQueues.has(interaction.guildId))
-        musicQueues.set(interaction.guildId, []);
-      musicQueues
-        .get(interaction.guildId)
-        .push({ title: songTitle, url: songUrl });
-
-      const isPlaying =
-        musicPlayers.get(interaction.guildId)?.state?.status ===
-        AudioPlayerStatus.Playing;
-      if (!isPlaying) playNextSong(interaction.guildId);
-
-      return interaction.editReply(`🎵 Added to queue: **${songTitle}**`);
-    } catch (err) {
-      console.error("❌ Play error:", err.message);
-      return interaction.editReply(
-        "❌ Failed to fetch that song. Try a different search term.",
-      );
-    }
-  }
-
-  // /skip
-  if (interaction.isChatInputCommand() && interaction.commandName === "skip") {
-    const player = musicPlayers.get(interaction.guildId);
-    if (!player)
-      return interaction.reply({
-        content: "❌ Nothing is playing.",
-        ephemeral: true,
-      });
-    player.stop(); // triggers Idle → playNextSong
-    return interaction.reply({ content: "⏭️ Skipped!", ephemeral: true });
-  }
-
-  // /stop
-  if (interaction.isChatInputCommand() && interaction.commandName === "stop") {
-    const player = musicPlayers.get(interaction.guildId);
-    if (!player)
-      return interaction.reply({
-        content: "❌ Nothing is playing.",
-        ephemeral: true,
-      });
-    musicQueues.delete(interaction.guildId);
-    player.stop();
-    musicPlayers.delete(interaction.guildId);
-    return interaction.reply({
-      content: "⏹️ Stopped and cleared the queue.",
-      ephemeral: true,
-    });
-  }
-
-  // /queue
-  if (interaction.isChatInputCommand() && interaction.commandName === "queue") {
-    const queue = musicQueues.get(interaction.guildId);
-    if (!queue || queue.length === 0) {
-      return interaction.reply({
-        content: "📭 The queue is empty.",
-        ephemeral: true,
-      });
-    }
-    const list = queue
-      .map((s, i) => `${i === 0 ? "▶️" : `${i}.`} ${s.title}`)
-      .join("\n");
-    return interaction.reply({
-      content: `🎵 **Queue:**\n${list}`,
-      ephemeral: true,
-    });
-  }
-
   // /leave
   if (interaction.isChatInputCommand() && interaction.commandName === "leave") {
     const connection = getVoiceConnection(interaction.guildId);
@@ -1477,10 +1214,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     ttsQueues.delete(interaction.guildId);
     ttsPlaying.delete(interaction.guildId);
     ttsEnabled.delete(interaction.guildId);
-    musicQueues.delete(interaction.guildId);
-    musicPlayers.get(interaction.guildId)?.removeAllListeners();
-    musicPlayers.get(interaction.guildId)?.stop(true);
-    musicPlayers.delete(interaction.guildId);
     detachVoiceListener(interaction.guildId);
 
     connection.removeAllListeners();
@@ -1643,7 +1376,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
-  // Handle listened channels (guild messages)
   if (message.guild) {
     const listenedChannelId = listenChannels.get(message.guildId);
     if (listenedChannelId && message.channelId === listenedChannelId) {
@@ -1651,16 +1383,13 @@ client.on(Events.MessageCreate, async (message) => {
       try {
         await message.channel.sendTyping();
 
-        // Get or create history for this channel
         if (!conversationHistory.has(message.channelId)) {
           conversationHistory.set(message.channelId, []);
         }
         const history = conversationHistory.get(message.channelId);
 
-        // Add user message to history
         history.push({ role: "user", content: message.content });
 
-        // Keep last 20 messages to avoid token limits
         if (history.length > 20) history.splice(0, history.length - 20);
 
         const completion = await groq.chat.completions.create({
@@ -1671,7 +1400,7 @@ client.on(Events.MessageCreate, async (message) => {
               content:
                 "You are Offline, a helpful voice assistant in a Discord VC. Reply in English, keep it short since it will be read aloud. You can trash talk like 'You're dumb', 'You're an idiot' or 'You have no brain', even harsh/rude words are okay.",
             },
-            ...history, // ← send full history
+            ...history, 
           ],
           max_tokens: 500,
         });
@@ -1680,7 +1409,6 @@ client.on(Events.MessageCreate, async (message) => {
           completion.choices[0]?.message?.content ||
           "I couldn't generate a response.";
 
-        // Add assistant reply to history
         history.push({ role: "assistant", content: reply });
 
         await message.reply(reply);
@@ -1925,11 +1653,10 @@ async function updateAllPartyDisplays() {
         continue;
       }
 
-      // in updateAllPartyDisplays(), only this line changes:
       await msg.edit({
         content: built.content,
         embeds: built.embeds,
-        allowedMentions: { parse: [] }, // ← suppress notification pings on refresh edits
+        allowedMentions: { parse: [] },
       });
     } catch (err) {
       console.error(
